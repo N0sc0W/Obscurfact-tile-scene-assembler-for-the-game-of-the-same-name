@@ -1,0 +1,263 @@
+unit TilesAndSprites;
+
+{$mode ObjFPC}{$H+}
+
+interface
+
+uses
+  Classes, SysUtils, Generics.Collections,
+
+  CastleScene, CastleImages, CastleGLImages, CastleRectangles, CastleVectors,
+
+  MathUtils;
+
+type
+  TImageList = specialize TObjectList<TDrawableImage>;
+
+  TTileSet = class
+  private
+  public
+    TileW,
+    TileH,
+    WallH,
+    OverlapH,
+    OverlapV : Integer;
+
+    Slope : Single;
+
+    CapsTop,
+    CapsLeft,
+    CapsRight,
+    CapsCenter,  
+    CapsCliffLeft,
+    CapsCliffRight,
+    Walls : TImageList;
+
+    constructor Create;
+    procedure LoadForestTiles;   
+    procedure LoadForestForeTiles;
+  end;
+
+  TPlaneTrensform = class(TCastleImageTransform)
+  private
+  public  
+    HorSize,
+    VerSize : Single;
+
+    constructor Create(AOwner : TComponent); override;
+  end;
+
+  TPlaneCanvas = class(TComponent)
+  private           
+  public
+    NorthWest,
+    SouthEast : TPlaneTrensform;
+
+    constructor Create(AOwner : TComponent); override;
+  end;
+
+  function DrawTilesAtPlane(Tiles : TTileSet; IntList : TIntList;
+                            Owner : TComponent): TPlaneCanvas;
+
+implementation
+
+function DrawTilesAtPlane(Tiles : TTileSet; IntList : TIntList; Owner : TComponent): TPlaneCanvas;
+  function TilePosX(X : Single): Single;
+  begin
+    Result := Tiles.TileW * X + Tiles.OverlapH
+              - Tiles.OverlapH + Random(Tiles.OverlapH * 2);
+  end;
+
+  function TilePosY(Y : Single): Single;
+  begin
+    Result := Tiles.TileH * Y - Y * Y * Tiles.Slope
+              - Tiles.OverlapV + Random(Tiles.OverlapV * 2);
+  end;
+
+  procedure DrawAtCanvas(Canv, Img : TDrawableImage; X, Y: Single);
+  begin
+    Canv.DrawFrom(Img,
+                  FloatRectangle(X, Y, Img.Width, Img.Height),
+                  Img.FloatRect);
+  end;
+
+var
+  DrawblImg, Canv, FirstTile : TDrawableImage;
+  FirstPos : TVector2;
+  FinalImage : TCastleImage;
+  I, J : Integer;
+  CanvSize, CuttedSize : Single;
+  Ints : TIntList;     
+  Valleys, Pikes : TIntList;
+begin         
+  CanvSize   := Tiles.TileW * (IntList.Count+1);
+  CuttedSize := Tiles.TileW * (IntList.Count/2);
+  Ints := SliceIntList(IntList, -1, IntList.Count+1);
+
+  Valleys := FindValleys(IntList);
+  Pikes := FindPikes(IntList);
+  Canv := TDrawableImage.Create(Trunc(CanvSize), 1024, TRGBAlphaImage, True);
+  Canv.Alpha := acBlending;
+
+  Result := TPlaneCanvas.Create(Owner);
+  Result.NorthWest.HorSize := CuttedSize;
+  Result.NorthWest.VerSize := 1024; 
+  Result.SouthEast.HorSize := CuttedSize;
+  Result.SouthEast.VerSize := 1024;
+
+  FirstTile := TDrawableImage.Create('castle-data:/tiles/curse.png');
+  FirstPos := Vector2(TilePosX(0), 32+TilePosY(Ints.Items[1]));
+  DrawAtCanvas(Canv, FirstTile, FirstPos.X, FirstPos.Y);
+
+  for I := 2 to Ints.Count-2 do
+    if (Ints.Items[I] <= Ints.Items[I-1]) and (Ints.Items[I] <= Ints.Items[I+1]) then 
+      DrawAtCanvas(Canv, Tiles.CapsCenter[0],
+                   TilePosX(I-1),32+ TilePosY(Ints.Items[I]))
+    else if (Ints.Items[I] > Ints.Items[I+1] + 1) and (Ints.Items[I] <= Ints.Items[I-1]) then
+      DrawAtCanvas(Canv, Tiles.CapsCliffRight[0],
+                   TilePosX(I-1),32+ TilePosY(Ints.Items[I]))
+    else if (Ints.Items[I] > Ints.Items[I+1]) and (Ints.Items[I] <= Ints.Items[I-1]) then
+      DrawAtCanvas(Canv, Tiles.CapsRight[0],
+                   TilePosX(I-1),32+ TilePosY(Ints.Items[I]))
+    else if (Ints.Items[I] > Ints.Items[I-1]) and (Ints.Items[I] <= Ints.Items[I+1]) then 
+      DrawAtCanvas(Canv, Tiles.CapsLeft[0],
+                   TilePosX(I-1),32+ TilePosY(Ints.Items[I]))
+    else if (Ints.Items[I] > Ints.Items[I-1]) and (Ints.Items[I] > Ints.Items[I+1]) then
+      DrawAtCanvas(Canv, Tiles.CapsTop[0],
+                   TilePosX(I-1),32+ TilePosY(Ints.Items[I]));
+
+  DrawAtCanvas(Canv, FirstTile,
+               (CanvSize - Tiles.TileW) + FirstPos.X, FirstPos.Y);
+
+  for I := IntListMax(Ints) downto 0 do
+  begin
+
+    FirstTile := TDrawableImage.Create('castle-data:/tiles/curse.png');
+    FirstPos := Vector2(TilePosX(0), 32+TilePosY(I));
+    DrawAtCanvas(Canv, FirstTile, FirstPos.X, FirstPos.Y);
+
+    for J := 2 to Ints.Count-2 do
+    begin
+      if I >= Ints[J] then
+        Continue;
+      DrawAtCanvas(Canv, Tiles.CapsCenter[0], TilePosX(J-1), 32+TilePosY(I));
+    end;
+
+    DrawAtCanvas(Canv, FirstTile,
+                 (CanvSize - Tiles.TileW) + FirstPos.X, FirstPos.Y);
+
+  end;
+
+  FirstTile := TDrawableImage.Create('castle-data:/tiles/curse.png');
+  FirstPos := Vector2(TilePosX(0), TilePosY(0));
+  DrawAtCanvas(Canv, FirstTile, FirstPos.X, FirstPos.Y);
+
+  for J := 2 to Ints.Count-2 do
+  begin
+    if I >= Ints[J] then
+      Continue;
+    DrawAtCanvas(Canv, Tiles.Walls[0], TilePosX(J-1), TilePosY(0));
+  end;
+
+  DrawAtCanvas(Canv, FirstTile,
+               (CanvSize - Tiles.TileW) + FirstPos.X, FirstPos.Y);
+
+
+  DrawblImg := TDrawableImage.Create(Trunc(CuttedSize), 1024, TRGBAlphaImage, True);
+  DrawblImg.DrawFrom(Canv,
+                     FloatRectangle(0, 0, CuttedSize, Canv.Height),
+                     FloatRectangle(Tiles.TileW/2, 0, CuttedSize, Canv.Height));
+  FinalImage := DrawblImg.GetContents(TRGBAlphaImage);
+  Result.NorthWest.LoadFromImage(FinalImage, True);
+
+  DrawblImg.Destroy;
+  DrawblImg := TDrawableImage.Create(Trunc(CuttedSize), 1024, TRGBAlphaImage, True);
+  DrawblImg.DrawFrom(Canv,
+                     FloatRectangle(0, 0, CuttedSize, Canv.Height),
+                     FloatRectangle(Tiles.TileW/2 + CuttedSize, 0, CuttedSize, Canv.Height));
+  FinalImage := DrawblImg.GetContents(TRGBAlphaImage);
+  Result.SouthEast.LoadFromImage(FinalImage, True);
+
+end;
+
+constructor TPlaneTrensform.Create(AOwner : TComponent);
+begin
+  inherited;
+
+end;
+
+constructor TPlaneCanvas.Create(AOwner : TComponent);
+begin
+  inherited;
+
+  NorthWest := TPlaneTrensform.Create(Self);
+  SouthEast := TPlaneTrensform.Create(Self);
+end;
+
+constructor TTileSet.Create;
+begin
+
+end;
+
+procedure TTileSet.LoadForestTiles;
+begin
+  TileW := 48;
+  TileH := 32;
+  WallH := 128;
+  OverlapH := 8;
+  OverlapV := 8;
+  Slope := 1.5;
+
+  CapsTop    := TImageList.Create;
+  CapsLeft   := TImageList.Create;
+  CapsRight  := TImageList.Create;
+  CapsCenter := TImageList.Create; 
+  CapsCliffLeft := TImageList.Create;
+  CapsCliffRight := TImageList.Create;
+  Walls      := TImageList.Create;
+
+  CapsTop.Add(TDrawableImage.Create('castle-data:/tiles/forest/far_cap_00_a.png'));
+  CapsTop[0].Alpha := acBlending;
+  CapsLeft.Add(TDrawableImage.Create('castle-data:/tiles/forest/far_cap_01_a.png'));   
+  CapsLeft[0].Alpha := acBlending;
+  CapsRight.Add(TDrawableImage.Create('castle-data:/tiles/forest/far_cap_10_a.png'));   
+  CapsRight[0].Alpha := acBlending;
+  CapsCenter.Add(TDrawableImage.Create('castle-data:/tiles/forest/far_cap_11_a.png'));  
+  CapsCenter[0].Alpha := acBlending;
+  CapsCliffLeft.Add(TDrawableImage.Create('castle-data:/tiles/forest/cap_cliff_01_a.png'));   
+  CapsCliffLeft[0].Alpha := acBlending;
+  CapsCliffRight.Add(TDrawableImage.Create('castle-data:/tiles/forest/cap_cliff_10_a.png'));  
+  CapsCliffRight[0].Alpha := acBlending;
+  Walls.Add(TDrawableImage.Create('castle-data:/tiles/forest/far_wall_a.png'));   
+  Walls[0].Alpha := acBlending;
+  Walls.Add(TDrawableImage.Create('castle-data:/tiles/forest/far_wall_b.png'));  
+  Walls[1].Alpha := acBlending;
+end;
+
+procedure TTileSet.LoadForestForeTiles;
+begin
+  TileW := 128;
+  TileH := 64;    
+  WallH := 128;
+  OverlapH := 0;
+  OverlapV := 0;
+  Slope := 0;
+
+  CapsTop    := TImageList.Create;
+  CapsLeft   := TImageList.Create;
+  CapsRight  := TImageList.Create;
+  CapsCenter := TImageList.Create;  
+  CapsCliffLeft := TImageList.Create;
+  CapsCliffRight := TImageList.Create;
+  Walls      := TImageList.Create;
+
+  CapsTop.Add(TDrawableImage.Create('castle-data:/tiles/forest/mid_ground_a.png'));
+  CapsTop.Add(TDrawableImage.Create('castle-data:/tiles/forest/mid_ground_b.png'));
+  CapsLeft.Add(TDrawableImage.Create('castle-data:/tiles/forest/mid_ground_01_b.png'));
+  CapsRight.Add(TDrawableImage.Create('castle-data:/tiles/forest/mid_ground_10_b.png'));
+  CapsCenter.Add(TDrawableImage.Create('castle-data:/tiles/forest/mid_ground_fill.png'));
+  Walls.Add(TDrawableImage.Create('castle-data:/tiles/forest/mid_ground_fill.png'));
+end;
+
+end.
+
